@@ -33,6 +33,7 @@ async def on_ready():
 
 
 mainshop = [{"name":"Vbucks","price":100,"description":"Currency"},
+            {"name":"Blue","price":500,"description":"Get a role with the color blue. After purchasing, use $use blue"},
             {"name":"Rolex","price":1000,"description":"Time"},
             {"name":"Tesla","price":10000,"description":"Modern Car"},
             {"name":"Lambo","price":99999,"description":"Sports Car"}]
@@ -47,12 +48,21 @@ async def balance(ctx):
     wallet_amt = users[str(user.id)]["wallet"]
     bank_amt = users[str(user.id)]["bank"]
 
-    em = discord.Embed(title=f'{ctx.author.name} Balance',color = discord.Color.red())
+    em = discord.Embed(title=f'{ctx.author.name} Balance',color = discord.Color(0xff0000))
     em.add_field(name="Wallet Balance", value=wallet_amt)
     em.add_field(name='Bank Balance',value=bank_amt)
     await ctx.send(embed= em)
 
+
+@client.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        msg = "**Still On Cooldown!**, Plese try again in {:.2f}s".format(error.retry_after)
+        await ctx.send(msg)
+
+
 @client.command()
+@commands.cooldown(1,60,commands.BucketType.user)
 async def beg(ctx):
     await open_account(ctx.author)
     user = ctx.author
@@ -67,6 +77,7 @@ async def beg(ctx):
 
     with open("mainbank.json",'w') as f:
         json.dump(users,f)
+
 
 @client.command()
 async def daily(ctx):
@@ -303,10 +314,47 @@ async def shop(ctx):
         name = item["name"]
         price = item["price"]
         desc = item["description"]
-        em.add_field(name = name, value = f"${price} | {desc}")
+        em.add_field(name = name, value = f"${price} | {desc}", inline=False)
 
-    await ctx.send(embed = em)
+    await ctx.send(embed = em.set_footer(text = "To buy an item type !buy [item] [amount]"))
 
+@client.command()
+async def use(ctx, item_name):
+    await open_account(ctx.author)
+    user = ctx.author
+    users = await get_bank_data()
+
+    bag = users[str(user.id)]["bag"] if str(user.id) in users else []
+
+    item = None
+    for i in bag:
+        if i["item"].lower() == item_name.lower():
+            item = i
+            break
+
+    if item is None:
+        await ctx.send(f"You don't have the {item_name} item in your bag!")
+        return
+
+    if item["amount"] < 1:
+        await ctx.send(f"You don't have any {item_name} item left!")
+        return
+
+    if item_name.lower() == 'blue':
+        role_name = "blue"
+        color = discord.Color.blue()
+
+        role = discord.utils.get(ctx.guild.roles, name=role_name)
+
+        if role is None:
+            role = await ctx.guild.create_role(name=role_name, color=color)
+        
+        await ctx.author.add_roles(role)
+        await ctx.send(f"You have used 1 {item_name} item and have been assigned the {role_name} role!")
+        users[str(user.id)]["bag"][bag.index(item)]["amount"] -= 1
+
+    with open("mainbank.json",'w') as f:
+        json.dump(users,f)
 
 
 @client.command()
@@ -325,6 +373,7 @@ async def buy(ctx,item,amount = 1):
 
 
     await ctx.send(f"You just bought {amount} {item}")
+
 
 
 @client.command()
@@ -349,7 +398,7 @@ async def bag(ctx):
     await ctx.send(embed = em)
 
 
-async def buy_this(user,item_name,amount):
+async def buy_this(user, item_name, amount):
     item_name = item_name.lower()
     name_ = None
     for item in mainshop:
@@ -362,15 +411,14 @@ async def buy_this(user,item_name,amount):
     if name_ == None:
         return [False,1]
 
-    cost = price*amount
+    cost = price * amount
 
     users = await get_bank_data()
 
     bal = await update_bank(user)
 
-    if bal[0]<cost:
+    if bal[0] < cost:
         return [False,2]
-
 
     try:
         index = 0
@@ -383,20 +431,21 @@ async def buy_this(user,item_name,amount):
                 users[str(user.id)]["bag"][index]["amount"] = new_amt
                 t = 1
                 break
-            index+=1 
+            index += 1 
         if t == None:
-            obj = {"item":item_name , "amount" : amount}
+            obj = {"item":item_name, "amount":amount}
             users[str(user.id)]["bag"].append(obj)
     except:
-        obj = {"item":item_name , "amount" : amount}
+        obj = {"item":item_name, "amount":amount}
         users[str(user.id)]["bag"] = [obj]        
 
     with open("mainbank.json","w") as f:
-        json.dump(users,f)
+        json.dump(users, f)
 
-    await update_bank(user,cost*-1,"wallet")
+    await update_bank(user, cost*-1, "wallet")
 
-    return [True,"Worked"]
+    return [True, "Worked"]
+
     
 
 @client.command()
@@ -507,6 +556,7 @@ async def help(ctx):
     embed.add_field(name="`$slots <amount>`", value="Slots", inline=False)
     embed.add_field(name="`$shop`", value="Buy some stuff", inline=False)
     embed.add_field(name="`$buy <item>`", value="Buy something from the shop (you can only buy 1 item at a time)", inline=False)
+    embed.add_field(name="`$use <item>`", value="Use select items (example $use blue)", inline=False)
     embed.add_field(name="`$bag`", value="Check your inventory", inline=False)
     embed.add_field(name="`$sell <item>`", value="Sell any item you own (you can only sell 1 item at once)", inline=False)
     embed.add_field(name="`$richest/rich`", value="View the richest users", inline=False)
@@ -519,7 +569,7 @@ async def help(ctx):
     embed.add_field(name="`$say [message]`", value="Make the bot say a message (certain words filtered out)", inline=False)
     embed.add_field(name="`$user [user]`", value="Get a greeting from the bot to another user", inline=False)
     embed.add_field(name="`$ping`", value="Get the bot's latency in ms", inline=False)
-    embed.set_footer(text="Vic Nic")
+    embed.set_footer(text="Vic Nik Economy Bot")
     await ctx.send(embed=embed)
 
 
@@ -545,16 +595,6 @@ async def ping(ctx):
 async def user(ctx, member: discord.Member):
     embed = discord.Embed(description=f"Hi {member.mention}!", color=0x00ff00)
     await ctx.send(embed=embed)
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -617,4 +657,4 @@ async def update_bank(user,change=0,mode = 'wallet'):
 
 
 
-client.run('YOur_TOken')
+client.run('token')
